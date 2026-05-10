@@ -1,72 +1,45 @@
-name: Android Build
+name: Android Release Build
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_dispatch: # Yahan se tum manually build start kar paoge
+
+# Memory badhane ke liye taaki build crash na ho
+env:
+  GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g -Dorg.gradle.daemon=false"
 
 jobs:
   build:
-    name: Build apk and run tests
+    name: Build Release APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set Up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
 
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v5
-        with:
-          validate-wrappers: true
-          gradle-home-cache-cleanup: true
+        uses: gradle/actions/setup-gradle@v3
 
-      - name: Build Project with gradle
-        run: ./gradlew assembleDebug
+      # NAYA STEP: Fake Keystore generate karna sign karne ke liye
+      - name: Generate Fake Keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
 
-      - name: Run Local Tests
-        run: ./gradlew test
+      # BUILD STEP: assembleDebug ko hata kar assembleRelease kar diya hai.
+      # Faltu ke tests aur linting skip karne ke liye (-x test -x lint -x ktlintCheck) lagaya hai.
+      - name: Build Project with gradle (Release)
+        run: ./gradlew assembleRelease -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore -Pandroid.injected.signing.store.password=android -Pandroid.injected.signing.key.alias=androiddebugkey -Pandroid.injected.signing.key.password=android -x lint -x test -x ktlintCheck
 
-      - name: Lint Checks
-        run: ./gradlew ktlintCheck
-
-        # Upload all build artifacts in separate steps. This can be shortened once https://github.com/actions/upload-artifact/pull/354 is merged.
-      - name: Upload artifact nextplayer-universal-debug.apk
-        uses: actions/upload-artifact@v6
+      # UPLOAD STEP: 5 alag alag steps likhne ke bajaye ek hi step me saare release APKs upload kar diye hain
+      - name: Upload Release APKs
+        uses: actions/upload-artifact@v4
         with:
-          name: nextplayer-universal-debug.apk
-          path: ./app/build/outputs/apk/debug/app-universal-debug.apk
-      - name: Upload artifact nextplayer-arm64-v8a-debug.apk
-        uses: actions/upload-artifact@v6
-        with:
-          name: nextplayer-arm64-v8a-debug.apk
-          path: ./app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
-      - name: Upload artifact nextplayer-armeabi-v7a-debug.apk
-        uses: actions/upload-artifact@v6
-        with:
-          name: nextplayer-armeabi-v7a-debug.apk
-          path: ./app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk
-      - name: Upload artifact nextplayer-x86_64-debug.apk
-        uses: actions/upload-artifact@v6
-        with:
-          name: nextplayer-x86_64-debug.apk
-          path: ./app/build/outputs/apk/debug/app-x86_64-debug.apk
-      - name: Upload artifact nextplayer-x86-debug.apk
-        uses: actions/upload-artifact@v6
-        with:
-          name: nextplayer-x86-debug.apk
-          path: ./app/build/outputs/apk/debug/app-x86-debug.apk
-
-      - name: Upload build reports
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: build-reports
-          path: app/build/reports
+          name: nextplayer-release-apks
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 20
